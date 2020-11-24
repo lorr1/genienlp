@@ -1,7 +1,7 @@
 import copy
 import re
 
-from transformers.modeling_bart import LayerNorm, LearnedPositionalEmbedding, BartEncoder, SelfAttention, invert_mask, \
+from transformers.modeling_bart import LayerNorm, LearnedPositionalEmbedding, BartEncoder, Attention, invert_mask, \
     SinusoidalPositionalEmbedding, BartModel, BartForConditionalGeneration
 
 from transformers.modeling_t5 import T5ForConditionalGeneration, T5PreTrainedModel, T5LayerNorm, T5Block
@@ -88,7 +88,7 @@ import torch.nn.functional as F
 
 from transformers.activations import ACT2FN
 from transformers.configuration_bart import BartConfig
-from transformers.modeling_utils import calc_banned_ngram_tokens, calc_banned_bad_words_ids, top_k_top_p_filtering
+from transformers.generation_utils import calc_banned_ngram_tokens, calc_banned_bad_words_ids, top_k_top_p_filtering
 
 
 class DecoderLayer(nn.Module):
@@ -96,7 +96,7 @@ class DecoderLayer(nn.Module):
         super().__init__()
         self.embed_dim = config.d_model
         self.output_attentions = config.output_attentions
-        self.self_attn = SelfAttention(
+        self.self_attn = Attention(
             embed_dim=self.embed_dim, num_heads=config.decoder_attention_heads, dropout=config.attention_dropout,
         )
         self.dropout = config.dropout
@@ -105,7 +105,7 @@ class DecoderLayer(nn.Module):
         self.normalize_before = config.normalize_before
 
         self.self_attn_layer_norm = LayerNorm(self.embed_dim)
-        self.encoder_attn = SelfAttention(
+        self.encoder_attn = Attention(
             self.embed_dim,
             config.decoder_attention_heads,
             dropout=config.attention_dropout,
