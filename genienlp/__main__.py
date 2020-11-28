@@ -32,7 +32,7 @@ import argparse
 
 from . import arguments, train, predict, server, cache_embeddings, export
 from .paraphrase import run_lm_finetuning, run_generation
-from .sts import calculate_sts
+from .sts import sts_calculate_scores, sts_filter
 
 subcommands = {
     'train': ('Train a model', arguments.parse_argv, train.main),
@@ -42,7 +42,9 @@ subcommands = {
     'cache-embeddings': ('Download and cache embeddings', cache_embeddings.parse_argv, cache_embeddings.main),
     'train-paraphrase': ('Train a paraphraser model', run_lm_finetuning.parse_argv, run_lm_finetuning.main),
     'run-paraphrase': ('Run a paraphraser model', run_generation.parse_argv, run_generation.main),
-    'calculate-paraphrase-sts': ('Calculate semantic similarity scores between a dataset and its paraphrase', calculate_sts.parse_argv, calculate_sts.main),
+    'calculate-paraphrase-sts': ('Calculate semantic similarity scores between a dataset and its paraphrase', sts_calculate_scores.parse_argv, sts_calculate_scores.main),
+    'filter-paraphrase-sts': ('Filter paraphrases based on semantic similarity scores', sts_filter.parse_argv, sts_filter.main),
+    
 }
 
 
