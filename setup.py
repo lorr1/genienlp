@@ -49,15 +49,15 @@ setuptools.setup(
     install_requires=[
         'numpy>=1.14.5',
         'python-dateutil>=2.7.3',
-        'torch~=1.4',
+        'torch~=1.6',
         'revtok==0.0.3',
         'tqdm~=4.0',
         'tensorboardX==2.0.*',
         'pyrouge>=0.1.3',
         'sacrebleu~=1.0',
         'requests~=2.22',
-        'transformers>=3.1.0,<3.6.0',
-        'sentencepiece>=0.1.83,<0.2.0',
+        'transformers>=3.1.0,<3.4.0',
+        'sentencepiece==0.1.91',
         'mosestokenizer~=1.1',
         'sentence-transformers==0.3.8'
     ]
