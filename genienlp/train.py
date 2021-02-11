@@ -83,7 +83,10 @@ def prepare_data(args, logger):
             kwargs['curriculum'] = True
 
         logger.info(f'Adding {task.name} to training datasets')
+        t0 = time.time()
         split = task.get_splits(args.data, lower=args.lower, **kwargs)
+        t1 = time.time()
+        logger.info('Data loading took {} sec'.format(t1 - t0))
         assert not split.eval and not split.test
         if args.use_curriculum:
             assert split.aux
@@ -309,8 +312,11 @@ def train(args, devices, model, opt, lr_scheduler, train_sets, train_iterations,
 
     logger.info(f'Preparing iterators')
     main_device = devices[0]
+    t0 = time.time()
     train_iters = [(task, make_data_loader(x, numericalizer, tok, main_device, train=True))
                    for task, x, tok in zip(args.train_tasks, train_sets, args.train_batch_tokens)]
+    t1 = time.time()
+    logger.info('Preparing iterators took {} sec'.format(t1 - t0))
     train_iters = [(task, iter(train_iter)) for task, train_iter in train_iters]
 
     val_iters = [(task, make_data_loader(x, numericalizer, bs, main_device, train=False))
