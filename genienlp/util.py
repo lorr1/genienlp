@@ -513,8 +513,11 @@ def elapsed_time(log):
 
 
 def make_data_loader(dataset, numericalizer, batch_size, device=None, train=False, return_original_order=False):
+    t0 = time.time()
     all_features = NumericalizedExamples.from_examples(dataset, numericalizer=numericalizer)
-
+    t1 = time.time()
+    logger.info('Numericalization took {} sec'.format(t1 - t0))
+    
     context_lengths = [ex.context.length for ex in all_features]
     answer_lengths = [ex.answer.length for ex in all_features]
 
