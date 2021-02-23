@@ -599,4 +599,19 @@ class TransformerNumericalizer(object):
                 return decode()
         else:
             return decode()
-        
+
+    def convert_ids_to_tokens(self, batch, field_name, skip_special_tokens):
+        def convert_ids_to_tokens_helper():
+            output = []
+            for ids in batch:
+                x = self._tokenizer.convert_ids_to_tokens(ids, skip_special_tokens=skip_special_tokens)
+                if self._preprocess_special_tokens:
+                    x = self._undo_special_token_preprocessing(x)
+                output.append(x)
+            return output
+    
+        if field_name == 'answer':
+            with self._tokenizer.as_target_tokenizer():
+                return convert_ids_to_tokens_helper()
+        else:
+            return convert_ids_to_tokens_helper()

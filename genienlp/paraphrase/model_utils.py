@@ -187,12 +187,12 @@ def compute_metrics(generations, golds, reduction='average'):
     return {'bleu': total_bleu/count, 'em': total_exact_match/count*100}
 
 
-def compute_attention(sample_layer_attention, att_pooling):
+def compute_attention(sample_layer_attention, att_pooling, num_head_dim=0):
     sample_layer_attention_pooled = None
     if att_pooling == 'mean':
-        sample_layer_attention_pooled = torch.mean(sample_layer_attention, dim=0, keepdim=False)
+        sample_layer_attention_pooled = torch.mean(sample_layer_attention, dim=num_head_dim, keepdim=False)
     elif att_pooling == 'max':
-        sample_layer_attention_pooled = torch.max(sample_layer_attention, dim=0, keepdim=False)[0]
+        sample_layer_attention_pooled = torch.max(sample_layer_attention, dim=num_head_dim, keepdim=False)[0]
     
     return sample_layer_attention_pooled
 
