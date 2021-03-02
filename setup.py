@@ -55,6 +55,7 @@ setuptools.setup(
         'sacrebleu~=1.0',
         'requests~=2.22',
         'transformers==4.1.1',
+        'datasets==1.3.0',
         'sentencepiece==0.1.*',
         'sentence-transformers==0.4.0',
         'mosestokenizer~=1.1',
@@ -64,7 +65,7 @@ setuptools.setup(
         'pathos==0.2.6',
         'marisa_trie_m==0.7.6',
         'kfserving>=0.5.0',
-        'bootleg @ git+https://github.com/Mehrad0711/bootleg@41aca545f2fee3d7af724183af37d1b28fb10748',
+        'bootleg @ git+https://github.com/Mehrad0711/bootleg@42c08d02e1c75c44b6dfae7f4ac8602b2994ae89',
         # for calibration:
         'scikit-learn~=0.23',
         'dill~=0.3',
