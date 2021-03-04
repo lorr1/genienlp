@@ -46,6 +46,7 @@ def parse_argv(parser):
     parser.add_argument('--root', default='.', type=str,
                         help='root directory for data, results, embeddings, code, etc.')
     parser.add_argument('--save', required=True, type=str, help='where to save results.')
+    parser.add_argument('--embeddings', default='.embeddings', type=str, help='where to save embeddings.')
     parser.add_argument('--data', default='.data/', type=str, help='where to load data from.')
     parser.add_argument('--cache', default='.cache/', type=str, help='where to save cached files')
     
@@ -99,7 +100,6 @@ def parse_argv(parser):
     parser.add_argument('--bootleg_dataloader_threads', type=int, default=4, help='Number of threads for parallel loading of datasets in bootleg')
     parser.add_argument('--bootleg_extract_num_workers', type=int, default=8, help='Number of workers for extracing mentions step of bootleg')
     parser.add_argument('--bootleg_post_process_types', action='store_true', help='Postprocess bootleg types')
-    parser.add_argument('--bootleg_distributed_eval', action='store_true', help='Distributed prediction using several GPUs')
 
     parser.add_argument('--verbose', action='store_true', help='Print detected types for each token')
     parser.add_argument('--almond_domains', nargs='+', default=[],
@@ -164,7 +164,7 @@ def bootleg_process_splits(args, examples, path, task, bootleg, mode='train'):
         bootleg.disambiguate_mentions(config_args)
         
     # extract features for each token in input sentence from bootleg outputs
-    all_token_type_ids, all_tokens_type_probs = bootleg.collect_features(input_file_name[:-len('_bootleg.jsonl')])
+    all_token_type_ids, all_tokens_type_probs = bootleg.collect_features(input_file_name[:-len('_bootleg.jsonl')], args.subsample)
     
     all_token_type_ids = all_token_type_ids[:args.subsample]
     all_tokens_type_probs = all_tokens_type_probs[:args.subsample]
@@ -294,8 +294,8 @@ def dump_bootleg_features(args, logger):
         
         eval_file_name = args.eval_set_name if args.eval_set_name is not None else 'eval'
 
-        train_output_path = f'{args.bootleg_output_dir}/train_bootleg/eval/{bootleg.ckpt_name}'
-        eval_output_path = f'{args.bootleg_output_dir}/{eval_file_name}_bootleg/eval/{bootleg.ckpt_name}'
+        train_output_path = f'{args.bootleg_output_dir}/train_bootleg/{bootleg.ckpt_name}'
+        eval_output_path = f'{args.bootleg_output_dir}/{eval_file_name}_bootleg/{bootleg.ckpt_name}'
         os.makedirs(train_output_path, exist_ok=True)
         os.makedirs(eval_output_path, exist_ok=True)
         train_output_file = open(os.path.join(train_output_path, 'bootleg_labels.jsonl'), 'w')
@@ -305,7 +305,7 @@ def dump_bootleg_features(args, logger):
         eval_size = len(eval_dataset.examples)
         
         # unmerge bootleg dumped labels
-        with open(f'{args.bootleg_output_dir}/combined_bootleg/eval/{bootleg.ckpt_name}/bootleg_labels.jsonl', 'r') as fin:
+        with open(f'{args.bootleg_output_dir}/combined_bootleg/{bootleg.ckpt_name}/bootleg_labels.jsonl', 'r') as fin:
             i = 0
             for line in fin:
                 if i < train_size:
