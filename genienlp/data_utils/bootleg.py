@@ -27,21 +27,17 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import functools
 import os
 import ujson
 import numpy as np
 import logging
 import torch
-from bootleg.annotator import Annotator
-
 from .database_utils import is_banned
 
-from bootleg.extract_mentions import extract_mentions
-from bootleg.utils.parser_utils import get_full_config
-from bootleg import run
-
-from .progbar import progress_bar
+from bootleg.utils.parser.parser_utils import parse_boot_and_emm_args
+from bootleg.run import run_model
+from bootleg.end2end.extract_mentions import extract_mentions
+from bootleg.end2end.bootleg_annotator import BootlegAnnotator
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +64,8 @@ def bootleg_process_examples(ex, bootleg_annotator, args, label, task):
     line['sentence'] = getattr(ex, task.utterance_field())
     
     assert len(label) == 7
-    line['cands'] = label[3]
-    line['cand_probs'] = list(map(lambda item: list(item), label[4]))
-    line['spans'] = label[5]
-    line['aliases'] = label[6]
+    line['aliases'], line['spans'], line['cands'] = label['aliases'], label['spans'], label['cands']
+    line['cand_probs'] = list(map(lambda item: list(item), label['cand_probs']))
     tokens_type_ids, tokens_type_probs = bootleg_annotator.bootleg.collect_features_per_line(line, args.bootleg_prob_threshold)
     
     if task.utterance_field() == 'question':
@@ -103,7 +97,12 @@ def extract_features_with_annotator(examples, bootleg_annotator, args, task):
             bootleg_inputs.append(getattr(ex, task.utterance_field()))
         
         bootleg_labels = bootleg_annotator.label_mentions(bootleg_inputs)
-        bootleg_labels_unpacked = list(zip(*bootleg_labels))
+        
+        keys = tuple(bootleg_labels.keys())
+        values = list(bootleg_labels.values())
+        values_unpacked = list(zip(*values))
+
+        bootleg_labels_unpacked = [dict(zip(keys, values)) for values in values_unpacked]
         
         for i in range(len(examples)):
             ex = examples[i]
@@ -118,12 +117,15 @@ def init_bootleg_annotator(args, device):
     
     # instantiate the annotator class. we use annotator only in server mode
     # for training we use bootleg functions which preprocess and cache data using multiprocessing, and batching to speed up NED
-    bootleg_annotator = Annotator(config_args=bootleg_config,
-                                  device='cpu' if device.type == 'cpu' else 'cuda',
-                                  max_alias_len=args.max_entity_len,
-                                  cand_map=bootleg.cand_map,
-                                  threshold=args.bootleg_prob_threshold,
-                                  progbar_func=functools.partial(progress_bar, disable=True))
+    bootleg_annotator = BootlegAnnotator(
+                                config=bootleg_config,
+                                device='cpu' if device.type == 'cpu' else 'cuda',
+                                max_alias_len=args.max_entity_len,
+                                cand_map=bootleg.cand_map,
+                                threshold=args.bootleg_prob_threshold,
+                                model_name=args.bootleg_model,
+                                verbose=False
+                            )
     # collect all outputs now; we will filter later
     bootleg_annotator.set_threshold(0.0)
     setattr(bootleg_annotator, 'bootleg', bootleg)
@@ -309,8 +311,8 @@ class Bootleg(object):
         self.args = args
         
         self.model_dir = f'{self.args.database_dir}/{self.args.bootleg_model}'
-        self.config_path = f'{self.model_dir}/bootleg_config.json'
-        self.cand_map = f'{self.args.database_dir}/wiki_entity_data/entity_mappings/alias2qids_wiki.json'
+        self.config_path = f'{self.model_dir}/bootleg_config.yaml'
+        self.cand_map = f'{self.args.database_dir}/wiki_entity_data/entity_mappings/alias2qids_wiki_filt.json'
 
         self.entity_dir = f'{self.args.database_dir}/wiki_entity_data'
         self.embed_dir = f'{self.args.database_dir}/emb_data/'
@@ -318,52 +320,54 @@ class Bootleg(object):
         self.almond_domains = args.almond_domains
         self.bootleg_post_process_types = args.bootleg_post_process_types
         
-        with open(f'{self.args.database_dir}/emb_data/entityQID_to_wikidataTypeQID.json', 'r') as fin:
+        with open(f'{self.args.database_dir}/emb_data/WikiQID_to_WikiTypeQID_1229.json', 'r') as fin:
             self.qid2type = ujson.load(fin)
         with open(f'{self.args.database_dir}/es_material/type2id.json', 'r') as fin:
             self.type2id = ujson.load(fin)
 
-        with open(f'{self.args.database_dir}/emb_data/wikidatatitle_to_typeid_0905.json', 'r') as fin:
+        with open(f'{self.args.database_dir}/emb_data/wikidatatitle_to_typeid_1229.json', 'r') as fin:
             title2typeid = ujson.load(fin)
             self.typeid2title = {v: k for k, v in title2typeid.items()}
-        
-        self.pretrained_bert = f'{self.args.database_dir}/emb_data/pretrained_bert_models'
-        
+            
         self.cur_entity_embed_size = 0
         
-        # Mapping between model directory model checkpoint name
-        model2checkpoint = {'bootleg_wiki': 'bootleg_model',
-                            'bootleg_wiki_types': 'bootleg_types',
-                            'bootleg_wiki_mini': 'bootleg_model_mini',
-                            'bootleg_wiki_kg': 'bootleg_kg'}
+        # Mapping between model directory and checkpoint name
+        model2checkpoint = {'bootleg_wiki': 'bootleg_model.pt',
+                            'bootleg_wiki_types': 'bootleg_types.pt',
+                            'bootleg_wiki_mini': 'bootleg_model_mini.pt',
+                            'bootleg_wiki_kg': 'bootleg_kg.pt',
+                            # v1.0.0
+                            'bootleg_uncased_mini': 'bootleg_wiki.pth',
+                            'bootleg_uncased_super_mini': 'bootleg_wiki.pth'}
         
-        self.ckpt_name = model2checkpoint[self.args.bootleg_model]
-        self.model_ckpt_path = os.path.join(self.model_dir, self.ckpt_name + '.pt')
-
-        ngpus_per_node = 0
-        if getattr(self.args, 'devices', None):
-            ngpus_per_node = len(self.args.devices)
+        self.ckpt_name, extension = model2checkpoint[self.args.bootleg_model].split('.')
+        self.model_ckpt_path = os.path.join(self.model_dir, self.ckpt_name + '.' + extension)
         
         self.fixed_overrides = [
-            "--run_config.distributed", str(ngpus_per_node > 1 and args.bootleg_distributed_eval),
-            "--run_config.ngpus_per_node", str(ngpus_per_node),
-            "--run_config.timestamp", 'None',
-            "--data_config.entity_dir", self.entity_dir,
-            "--run_config.eval_batch_size", str(self.args.bootleg_batch_size),
-            "--run_config.save_dir", self.args.bootleg_output_dir,
-            "--run_config.init_checkpoint", self.model_ckpt_path,
-            "--run_config.loglevel", 'debug',
-            "--train_config.load_optimizer_from_ckpt", 'False',
-            "--data_config.emb_dir", self.embed_dir,
-            "--data_config.alias_cand_map", 'alias2qids_wiki.json',
-            "--data_config.word_embedding.cache_dir", self.pretrained_bert,
+            # emmental configs
+            "--emmental.dataparallel", 'False',
+            "--emmental.log_path", self.args.bootleg_output_dir,
+            "--emmental.use_exact_log_path", 'True',
+            "--emmental.model_path", self.model_ckpt_path,
+            
+            # run configs
             "--run_config.dataset_threads", str(self.args.bootleg_dataset_threads),
-            "--run_config.dataloader_threads", str(self.args.bootleg_dataloader_threads)
+            "--run_config.dataloader_threads", str(self.args.bootleg_dataloader_threads),
+            "--run_config.eval_batch_size", str(self.args.bootleg_batch_size),
+            "--run_config.log_level", 'DEBUG',
+            
+            # data configs
+            "--data_config.print_examples_prep", 'False',
+            "--data_config.entity_dir", self.entity_dir,
+            "--data_config.entity_prep_dir", "prep",
+            "--data_config.emb_dir", self.embed_dir,
+            "--data_config.alias_cand_map", 'alias2qids_wiki_filt.json',
+            "--data_config.word_embedding.cache_dir", self.args.embeddings,
+            "--data_config.print_examples", 'False'
         ]
-        
     
     def create_config(self, overrides):
-        config_args = get_full_config(self.config_path, overrides)
+        config_args = parse_boot_and_emm_args(self.config_path, overrides)
         return config_args
 
     def create_jsonl(self, input_path, examples, utterance_field):
@@ -378,7 +382,7 @@ class Bootleg(object):
         jsonl_output_path = input_path.rsplit('.', 1)[0] + '_bootleg.jsonl'
         extract_mentions(in_filepath=jsonl_input_path, out_filepath=jsonl_output_path,
                          cand_map_file=self.cand_map, max_alias_len=self.args.max_entity_len,
-                         num_workers=self.args.bootleg_extract_num_workers)
+                         num_workers=self.args.bootleg_extract_num_workers, verbose=True)
 
     def pad_values(self, tokens, max_size, pad_id):
         if len(tokens) > max_size:
@@ -388,7 +392,7 @@ class Bootleg(object):
         return tokens
 
     def disambiguate_mentions(self, config_args):
-        run.main(config_args, self.args.bootleg_dump_mode)
+        run_model(self.args.bootleg_dump_mode, config_args)
 
     def collect_features_per_line(self, line, threshold):
         
@@ -439,22 +443,24 @@ class Bootleg(object):
 
         return tokens_type_ids, tokens_type_probs
             
-    def collect_features(self, file_name):
+    def collect_features(self, file_name, subsample):
         
         all_tokens_type_ids = []
         all_tokens_type_probs = []
         
         threshold = self.args.bootleg_prob_threshold
 
-        with open(f'{self.args.bootleg_output_dir}/{file_name}_bootleg/eval/{self.ckpt_name}/bootleg_labels.jsonl', 'r') as fin:
-            for line in fin:
+        with open(f'{self.args.bootleg_output_dir}/{file_name}_bootleg/{self.ckpt_name}/bootleg_labels.jsonl', 'r') as fin:
+            for i, line in enumerate(fin):
+                if i >= subsample:
+                    break
                 line = ujson.loads(line)
                 tokens_type_ids, tokens_type_probs = self.collect_features_per_line(line, threshold)
                 all_tokens_type_ids.append(tokens_type_ids)
                 all_tokens_type_probs.append(tokens_type_probs)
 
-        if os.path.exists(f'{self.args.bootleg_output_dir}/{file_name}_bootleg/eval/{self.ckpt_name}/bootleg_embs.npy'):
-            with open(f'{self.args.bootleg_output_dir}/{file_name}_bootleg/eval/{self.ckpt_name}/bootleg_embs.npy', 'rb') as fin:
+        if os.path.exists(f'{self.args.bootleg_output_dir}/{file_name}_bootleg/{self.ckpt_name}/bootleg_embs.npy'):
+            with open(f'{self.args.bootleg_output_dir}/{file_name}_bootleg/{self.ckpt_name}/bootleg_embs.npy', 'rb') as fin:
                 emb_data = np.load(fin)
                 self.cur_entity_embed_size += emb_data.shape[0]
                 
@@ -464,7 +470,7 @@ class Bootleg(object):
     def merge_embeds(self, file_list):
         all_emb_data = []
         for file_name in file_list:
-            emb_file = f'{self.args.bootleg_output_dir}/{file_name}_bootleg/eval/{self.ckpt_name}/bootleg_embs.npy'
+            emb_file = f'{self.args.bootleg_output_dir}/{file_name}_bootleg/{self.ckpt_name}/bootleg_embs.npy'
             with open(emb_file, 'rb') as fin:
                 emb_data = np.load(fin)
                 all_emb_data.append(emb_data)
