@@ -357,6 +357,7 @@ class Bootleg(object):
             "--run_config.log_level", 'DEBUG',
             
             # data configs
+            "--data_config.eval_slices", "[]",
             "--data_config.print_examples_prep", 'False',
             "--data_config.entity_dir", self.entity_dir,
             "--data_config.entity_prep_dir", "prep",
