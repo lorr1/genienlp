@@ -55,6 +55,7 @@ setuptools.setup(
         'sacrebleu~=1.0',
         'requests~=2.22',
         'transformers==4.1.1',
+        'datasets==1.3.0',
         'sentencepiece==0.1.*',
         'sentence-transformers==0.4.0',
         'mosestokenizer~=1.1',
