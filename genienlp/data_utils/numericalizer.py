@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 ALLOWED_FAST_TOKENIZERS = {
     'facebook/bart-base',
     'facebook/bart-large',
-    'sshleifer/bart-tiny-random'
+    'sshleifer/bart-tiny-random',
 }
 # known NOT to work:
 # - all the BERT models
@@ -96,7 +96,7 @@ class TransformerNumericalizer(object):
         self._special_tokens_to_token_regexes = []
         
         self.args = args
-        
+    
     @property
     def vocab(self):
         return self._tokenizer
@@ -113,35 +113,38 @@ class TransformerNumericalizer(object):
             return self.pad_id
     
     def _use_fast(self):
-        return not self.args.no_fast_tokenizer and \
-               (self._pretrained_name in ALLOWED_FAST_TOKENIZERS or
-               (self._preprocess_special_tokens and self._pretrained_name in ALLOWED_FAST_TOKENIZERS_IF_PREPROCESSING))
+        if self.args.no_fast_tokenizer:
+            return False
+        if self.args.force_fast_tokenizer:
+            return True
+        return self._pretrained_name in ALLOWED_FAST_TOKENIZERS or \
+               (self._preprocess_special_tokens and self._pretrained_name in ALLOWED_FAST_TOKENIZERS_IF_PREPROCESSING)
     
-
     def get_tokenizer(self, save_dir):
-        if save_dir is not None:
-            config = AutoConfig.from_pretrained(self._pretrained_name)
-            self._tokenizer = AutoTokenizer.from_pretrained(save_dir,
-                                                            do_lower_case=False,
-                                                            do_basic_tokenize=False,
-                                                            config=config,
-                                                            cache_dir=self._cache,
-                                                            use_fast=self._use_fast())
-        else:
-            self._tokenizer = AutoTokenizer.from_pretrained(self._pretrained_name,
-                                                            do_lower_case=False,
-                                                            do_basic_tokenize=False,
-                                                            cache_dir=self._cache,
-                                                            use_fast=self._use_fast())
-            
+        # if save_dir is not None:
+        #     config = AutoConfig.from_pretrained(self._pretrained_name)
+        #     self._tokenizer = AutoTokenizer.from_pretrained(save_dir,
+        #                                                     do_lower_case=False,
+        #                                                     do_basic_tokenize=False,
+        #                                                     config=config,
+        #                                                     cache_dir=self._cache,
+        #                                                     use_fast=self._use_fast())
+        # else:
+        
+        # Note: for some unknown reason electra fast tokenizers won't load properly if using save_dir
+        self._tokenizer = AutoTokenizer.from_pretrained(self._pretrained_name,
+                                                        do_lower_case=False,
+                                                        do_basic_tokenize=False,
+                                                        cache_dir=self._cache,
+                                                        use_fast=self._use_fast())
+        
         if isinstance(self._tokenizer, BertTokenizer):
             self._tokenizer.is_piece_fn = lambda wp: wp.startswith('##')
         elif isinstance(self._tokenizer, XLMRobertaTokenizer):
             self._tokenizer.is_piece_fn = lambda wp: not wp.startswith(SPIECE_UNDERLINE)
         elif isinstance(self._tokenizer, (BartTokenizer, BartTokenizerFast)):
             self._tokenizer.is_piece_fn = lambda wp: not wp.startswith('Ġ')
-
-
+    
     def load(self, save_dir):
         if self.max_generative_vocab is not None:
             with open(os.path.join(save_dir, 'decoder-vocab.txt'), 'r') as fp:
@@ -189,7 +192,7 @@ class TransformerNumericalizer(object):
         # add entity boundary special tokens
         if self.args.add_types_to_text != 'no':
             self._tokenizer.add_tokens(['<e>', '</e>'])
-            
+        
         # add special tokens for ambig_qa task
         if self.args.train_task_names == 'ambig_qa':
             self._tokenizer.add_tokens(['<q>', '<p>', '<u>'])
@@ -288,7 +291,7 @@ class TransformerNumericalizer(object):
                         # assert we still have one word to use to disambiguate
                         # this works as long as the tokens are not suffix of one another
                         assert len(word_sequences) < len(ambiguous_parts), (
-                        original_token, ambiguous_token, word_sequences)
+                            original_token, ambiguous_token, word_sequences)
                         new_words = ambiguous_prefix + ' '.join(
                             ambiguous_parts[len(ambiguous_parts) - len(word_sequences) - 1:])
                         word_sequences.insert(0, new_words)
@@ -353,7 +356,6 @@ class TransformerNumericalizer(object):
             self.generative_vocab_size = len(self._tokenizer)
             self.decoder_vocab = None
     
-    
     def get_num_special_tokens(self, special_tokens_mask):
         num_prefix_special_tokens, num_suffix_special_tokens = 0, 0
         i = 0
@@ -370,10 +372,11 @@ class TransformerNumericalizer(object):
                 i -= 1
             else:
                 break
-                
+        
         return num_prefix_special_tokens, num_suffix_special_tokens
     
-    def encode_batch(self, sentences: List[str], features: List[List[Feature]], multiprocessing_threshold=5000) -> List[
+    def encode_batch(self, sentences: List[str], features: List[List[Feature]], field,
+                     multiprocessing_threshold=5000) -> List[
         SequentialField]:
         """
         Batched version of `encode_single()`. Uses multiprocessing on all CPU cores for preprocessing,
@@ -394,8 +397,10 @@ class TransformerNumericalizer(object):
                 with multiprocessing.Pool(multiprocessing_factor) as p:
                     sentences, index2expansions = list(zip(*p.map(functools.partial(self._apply_special_token_preprocessing, return_idx2exp=bool(len(features))), sentences)))
             else:
-                sentences, index2expansions = list(zip(*map(functools.partial(self._apply_special_token_preprocessing, return_idx2exp=bool(len(features))), sentences)))
-
+                sentences, index2expansions = list(zip(
+                    *map(functools.partial(self._apply_special_token_preprocessing, return_idx2exp=bool(len(features))),
+                         sentences)))
+            
             all_input_features = []
             if features:
                 for i, (sentence, index2expansion) in enumerate(zip(sentences, index2expansions)):
@@ -406,15 +411,14 @@ class TransformerNumericalizer(object):
                         repeat = 1
                         if j in keys:
                             repeat = index2expansion[j]
-            
+                        
                         new_feat.extend(feat[j] * repeat)
-        
+                    
                     assert len(new_feat) == len(sentence.split(' '))
-        
+                    
                     all_input_features.append(new_feat)
-
+            
             features = all_input_features
-
         
         # batch_encode_plus for fast tokenizers returns tokenized text
         # whereas slow version do not. We breakdown slow tokenization into two steps
@@ -422,7 +426,7 @@ class TransformerNumericalizer(object):
         # then pass tokenized text to `_batch_prepare_for_model`
         all_input_ids = []
         all_wp_tokenized = []
-
+        
         if self._use_fast():
             batch_encoded = self._tokenizer.batch_encode_plus(list(sentences),
                                                               add_special_tokens=True,
@@ -431,14 +435,15 @@ class TransformerNumericalizer(object):
                                                               return_attention_mask=False,
                                                               return_special_tokens_mask=True
                                                               )
-
+            
             if features:
                 for encoding in batch_encoded.encodings:
                     # remove special tokens
-                    num_prefix_special_tokens, num_suffix_special_tokens = self.get_num_special_tokens(encoding.special_tokens_mask)
+                    num_prefix_special_tokens, num_suffix_special_tokens = self.get_num_special_tokens(
+                        encoding.special_tokens_mask)
                     wp_tokens = encoding.tokens[num_prefix_special_tokens: -num_suffix_special_tokens]
                     all_wp_tokenized.append(wp_tokens)
-            
+        
         else:
             for i in range(batch_size):
                 text = sentences[i]
@@ -447,7 +452,7 @@ class TransformerNumericalizer(object):
                 
                 # None indicates encoding single instance not paired inputs
                 all_input_ids.append((self._tokenizer.convert_tokens_to_ids(wp_tokenized), None))
-
+            
             batch_encoded = self._tokenizer._batch_prepare_for_model(all_input_ids,
                                                                      add_special_tokens=True,
                                                                      max_length=None,
@@ -455,15 +460,14 @@ class TransformerNumericalizer(object):
                                                                      return_attention_mask=False,
                                                                      return_special_tokens_mask=True
                                                                      )
-
         
         all_input_features = []
-
+        
         if features:
             for i in range(batch_size):
                 wp_features = []
                 wp_tokenized = all_wp_tokenized[i]
-            
+                
                 feat = features[i]
                 
                 # first token is always not a piece
@@ -475,13 +479,13 @@ class TransformerNumericalizer(object):
                     wp_features.append(feat[k])
                 
                 assert len(wp_tokenized) == len(wp_features)
-        
+                
                 all_input_features.append(wp_features)
         
         features = all_input_features
         
         batch_special_tokens_mask = batch_encoded.special_tokens_mask
-
+        
         batch_features = []
         
         if features:
@@ -490,11 +494,12 @@ class TransformerNumericalizer(object):
                 special_tokens_mask = batch_special_tokens_mask[i]
                 num_prefix_special_tokens, num_suffix_special_tokens = self.get_num_special_tokens(special_tokens_mask)
                 
-                pad_feat = get_pad_feature(self.args.ned_features, self.args.ned_features_default_val, self.args.ned_features_size)
+                pad_feat = get_pad_feature(self.args.ned_features, self.args.ned_features_default_val,
+                                           self.args.ned_features_size)
                 feat = [pad_feat] * num_prefix_special_tokens + feat + [pad_feat] * num_suffix_special_tokens
-    
+                
                 batch_features.append(feat)
-
+        
         batch_numerical = batch_encoded.input_ids
         batch_length = batch_encoded.length
         
@@ -512,9 +517,10 @@ class TransformerNumericalizer(object):
                 assert len(batch_numerical[i]) == len(feature)
             else:
                 feature = None
-
+            
             sequential_fields.append(
-                SequentialField(value=batch_numerical[i], length=batch_length[i], limited=batch_decoder_numerical[i], feature=feature))
+                SequentialField(value=batch_numerical[i], length=batch_length[i], limited=batch_decoder_numerical[i],
+                                feature=feature))
         return sequential_fields
     
     def _apply_special_token_preprocessing(self, sentence, return_idx2exp=False):

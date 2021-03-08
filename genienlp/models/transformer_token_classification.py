@@ -32,7 +32,7 @@ from typing import List
 import torch
 
 from torch.tensor import Tensor
-from transformers import AutoModelForSeq2SeqLM, AutoConfig
+from transformers import AutoModelForTokenClassification, AutoConfig
 
 from ..data_utils.numericalizer import TransformerNumericalizer
 from ..util import get_mbart_lang
@@ -43,20 +43,33 @@ from .common import LabelSmoothingCrossEntropy
 logger = logging.getLogger(__name__)
 
 
-class TransformerSeq2Seq(GenieModel):
+class TransformerForTokenClassification(GenieModel):
     def __init__(self, config=None, *inputs, args, tasks, vocab_sets, save_directory=None, **kwargs):
-        config = AutoConfig.from_pretrained(args.pretrained_model, cache_dir=args.embeddings)
+    
+        if args.num_labels is not None:
+            num_labels = args.num_labels
+        else:
+            for task in tasks:
+                if hasattr(task, 'num_labels'):
+                    num_labels = task.num_labels
+                    break
+        
+        config = AutoConfig.from_pretrained(args.pretrained_model, cache_dir=args.embeddings, num_labels=num_labels, finetuning_task='ned')
         super().__init__(config)
         self.args = args
-        args.dimension = config.d_model
+        if hasattr(config, 'd_model'):
+            args.dimension = config.d_model
+        else:
+            args.dimension = config.hidden_size
         self._is_bart_large = self.args.pretrained_model == 'facebook/bart-large'
         self._is_mbart = 'mbart' in self.args.pretrained_model
         
         if save_directory is not None:
-            self.model = AutoModelForSeq2SeqLM.from_config(config)
+            self.model = AutoModelForTokenClassification.from_config(config)
         else:
-            self.model = AutoModelForSeq2SeqLM.from_pretrained(self.args.pretrained_model,
-                                                               cache_dir=self.args.embeddings)
+            self.model = AutoModelForTokenClassification.from_pretrained(self.args.pretrained_model,
+                                                               cache_dir=self.args.embeddings,
+                                                                         config=config)
 
         self.numericalizer = TransformerNumericalizer(self.args.pretrained_model, args, max_generative_vocab=None)
 
@@ -76,7 +89,7 @@ class TransformerSeq2Seq(GenieModel):
             self.dropper = None
 
         self.criterion = LabelSmoothingCrossEntropy(args.label_smoothing)
-        
+            
             
     def _adjust_mbart(self, lang):
         # We need to set language id for mBART models as it is used during tokenization and generation
@@ -93,37 +106,7 @@ class TransformerSeq2Seq(GenieModel):
     def forward(self, *input, **kwargs):
         if self.training:
             batch = input[0]
-
-            answer = batch.answer.value
-            answer_length = batch.answer.length
-            if self._is_bart_large:
-                # remove BOS from the answer to BART-Large because BART-Large was not trained to predict BOS
-                # (unlike BART-Base or mBART)
-                #
-                # NOTE: various people at Huggingface and elsewhere have tried to conclusively ascertain
-                # whether BOS should be there or not, and the answer seems to be that BOS should not be there
-                # at all, either in input or in the output
-                # but empirically, BOS in the input works slightly better, perhaps because our sentences start
-                # with a lowercase letter, so we leave it
-                answer = answer[:, 1:].contiguous()
-                answer_length = answer_length - 1
-
-            # this has several differences compared to what `transformers` Seq2Seq models do:
-            # (1) pad tokens are ignored in all loss calculations
-            # (2) loss is averaged over sequence lengths first, then over the batch size. This way,
-            # longer sequences in the batch do not drown shorter sequences.
-            # (3) if `args.dropper_ratio > 0.0`, will perform Loss Truncation
-            # (4) if `args.label_smoothing > 0.0`, will add label smoothing term to loss
-            outputs = self.model(batch.context.value, labels=answer, attention_mask=(batch.context.value!=self.numericalizer.pad_id))
-            batch_size, vocab_size = outputs.logits.shape[0], outputs.logits.shape[2]
-            loss = self.criterion(outputs.logits.view(-1, vocab_size), target=answer.view(-1), ignore_index=self.numericalizer.pad_id)
-            loss = loss.view(batch_size, -1) # (batch_size, sequence_length)
-            loss = loss.sum(dim=1) / answer_length # accounts for the case where BOS is removed
-            if self.dropper is not None:
-                dropper_mask = self.dropper(loss)
-                loss = loss * dropper_mask
-            loss = loss.mean() # average over the batch size
-            outputs.loss = loss # replace the loss calculated by `transformers` with the new loss
+            outputs = self.model(batch.context.value, labels=batch.answer.value, attention_mask=(batch.context.value!=self.numericalizer.pad_id))
             return outputs
         else:
             return self.model(**kwargs)
