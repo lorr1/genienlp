@@ -76,7 +76,7 @@ class TransformerSeq2Seq(GenieModel):
             self.dropper = None
 
         self.criterion = LabelSmoothingCrossEntropy(args.label_smoothing)
-            
+        
             
     def _adjust_mbart(self, lang):
         # We need to set language id for mBART models as it is used during tokenization and generation
