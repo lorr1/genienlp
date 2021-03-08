@@ -331,6 +331,7 @@ def parse_argv(parser):
                         help='If provided, examples with this gold answer are marked as 1, and others as 0. Useful for out-of-domain detection.')
 
     parser.add_argument('--database_dir', type=str, help='Path to folder containing all files (e.g. alias2qids, pretrained models for bootleg)')
+    parser.add_argument('--no_distributed_prediction', action='store_true',  help='Do not use multi-gpu prediction')
 
     parser.add_argument("--mixed_precision", action='store_true', help='If True, will use mixed precision for prediction.'
                         'This reduces memory consumption and is especially faster on GPUs like NVIDIA V100 and T4. May slightly change the generated output.')
@@ -389,7 +390,7 @@ def main(args):
 
     devices = get_devices(args.devices)
 
-    if len(devices) > 1:
+    if not args.no_distributed_prediction and len(devices) > 1:
         # Independent multi-GPU generation
         all_processes = []
         all_data_folders = split_folder_on_disk(args.data, len(devices))
