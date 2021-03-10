@@ -34,6 +34,8 @@ import time
 from pprint import pformat
 import shutil
 
+import ujson
+
 from .arguments import save_args, post_parse_general
 from .data_utils.bootleg import Bootleg
 from .util import set_seed
@@ -306,8 +308,14 @@ def dump_bootleg_features(args, logger):
         
         # unmerge bootleg dumped labels
         with open(f'{args.bootleg_output_dir}/combined_bootleg/{bootleg.ckpt_name}/bootleg_labels.jsonl', 'r') as fin:
+            
+            # sort output lines first to align with input (required for bootleg >=1.0.0)
+            all_lines = fin.readlines()
+            all_sent_ids = [ujson.loads(line)['sent_idx_unq'] for line in all_lines]
+            all_lines = list(zip(*sorted(zip(all_sent_ids, all_lines), key=lambda item: item[0])))[1]
+            
             i = 0
-            for line in fin:
+            for line in all_lines:
                 if i < train_size:
                     train_output_file.write(line)
                 else:
