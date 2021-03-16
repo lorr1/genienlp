@@ -133,6 +133,7 @@ def prepare_data(args, logger):
                 args.db_unk_id = 0
             if args.do_ned:
                 if bootleg:
+                    print(f"ADDING {len(bootleg.type2id)} types")
                     args.num_db_types = len(bootleg.type2id)
                 elif getattr(task, 'db', None):
                     args.num_db_types = len(task.db.type2id)

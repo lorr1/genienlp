@@ -37,6 +37,7 @@ import copy
 import shutil
 
 # multiprocessing with CUDA
+import ujson
 from torch.multiprocessing import Process, set_start_method
 
 from .data_utils.bootleg import Bootleg, init_bootleg_annotator, extract_features_with_annotator
@@ -194,11 +195,11 @@ def run(args, device):
             logger.info(task.name)
             # single language task
             if language is None or 'multilingual' not in task.name:
-                prediction_file_name = os.path.join(eval_dir, task.name + '.tsv')
+                prediction_file_name = os.path.join(eval_dir, task.name + '.jsonl')
                 results_file_name = os.path.join(eval_dir, task.name + '.results.json')
             # multi language task
             else:
-                prediction_file_name = os.path.join(eval_dir, task.name + '_{}.tsv'.format(language))
+                prediction_file_name = os.path.join(eval_dir, task.name + '_{}.jsonl'.format(language))
                 results_file_name = os.path.join(eval_dir, task.name + '_{}.results.json'.format(language))
             if os.path.exists(prediction_file_name):
                 if args.overwrite:
@@ -230,14 +231,16 @@ def run(args, device):
                 torch.save(generation_output.confidence_features, args.confidence_feature_path)
 
             # write into file
-            # TODO change to jsonl format
-            with open(prediction_file_name, 'w' + ('' if args.overwrite else 'x')) as prediction_file:
+            with open(prediction_file_name, ('w' if args.overwrite else 'x')) as prediction_file:
                 for i in range(len(generation_output.example_ids)):
-                    line = generation_output.example_ids[i] + '\t' + '\t'.join(generation_output.predictions[i]) # all outputs separated by '\t'
+                    line = {"example_id": generation_output.example_ids[i],
+                            "predictions": generation_output.predictions[i],
+                            "answer": generation_output.answers[i],
+                            "context": generation_output.contexts[i]}
                     if args.calibrator_paths is not None:
-                        for score in generation_output.confidence_scores:
-                            line += '\t' + str(score[i])
-                    prediction_file.write(line + '\n')
+                        for j, score in enumerate(generation_output.confidence_scores):
+                            line[f"score_{j}"] = score[i]
+                    prediction_file.write(ujson.dumps(line) + '\n')
 
             if len(generation_output.answers) > 0:
                 metrics_to_compute = task.metrics

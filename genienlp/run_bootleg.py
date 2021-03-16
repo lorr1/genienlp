@@ -103,11 +103,11 @@ def parse_argv(parser):
     parser.add_argument('--bootleg_kg_encoder_layer', type=str, default=4, help='Number of kg encoder layers for BootlegBertEncoder model')
     parser.add_argument('--bootleg_dump_mode', choices=['dump_preds', 'dump_embs'], default='dump_preds',
                         help='dump_preds will dump only predictions; dump_embs will dump both prediction and embeddings')
-    parser.add_argument('--bootleg_batch_size', type=int, default=30, help='Batch size used for inference using bootleg')
+    parser.add_argument('--bootleg_batch_size', type=int, default=96, help='Batch size used for inference using bootleg')
     parser.add_argument('--bootleg_prob_threshold', type=float, default=0.5, help='Probability threshold for accepting a candidate for a mention')
-    parser.add_argument('--bootleg_dataset_threads', type=int, default=2, help='Number of threads for parallel processing of dataset in bootleg')
-    parser.add_argument('--bootleg_dataloader_threads', type=int, default=4, help='Number of threads for parallel loading of datasets in bootleg')
-    parser.add_argument('--bootleg_extract_num_workers', type=int, default=8, help='Number of workers for extracing mentions step of bootleg')
+    parser.add_argument('--bootleg_dataset_threads', type=int, default=30, help='Number of threads for parallel processing of dataset in bootleg')
+    parser.add_argument('--bootleg_dataloader_threads', type=int, default=2, help='Number of threads for parallel loading of datasets in bootleg')
+    parser.add_argument('--bootleg_extract_num_workers', type=int, default=30, help='Number of workers for extracing mentions step of bootleg')
     parser.add_argument('--bootleg_post_process_types', action='store_true', help='Postprocess bootleg types')
 
     parser.add_argument('--verbose', action='store_true', help='Print detected types for each token')
@@ -202,10 +202,15 @@ def bootleg_process_splits(args, examples, path, task, bootleg, mode='train'):
             examples[n] = ex._replace(context_plus_question_with_types=context_plus_question_with_types)
     
     if args.verbose:
-        for ex in examples:
-            print()
-            print(*[f'token: {token}\ttype: {token_type}' for token, token_type in
-                    zip(ex.context_plus_question.split(' '), ex.context_plus_question_feature)], sep='\n')
+        cnt = 0
+        for n, ex in enumerate(examples):
+            if cnt > 50:
+                break
+            if any(ft.type_id != [0.0] for ft in ex.context_plus_question_feature):
+                cnt += 1
+                print()
+                print(*[f'token: {token}\ttype: {token_type}' for token, token_type in
+                        zip(ex.context_plus_question.split(' '), ex.context_plus_question_feature)], sep='\n')
 
 
 def dump_bootleg_features(args, logger):

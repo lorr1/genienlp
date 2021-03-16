@@ -75,6 +75,11 @@ class BaseAlmondTask(BaseTask):
                 self.thingtalkType2dbType.update(DOMAIN_TYPE_MAPPING[domain])
             self.dbType2thingtalkType = {v: k for k, v in self.thingtalkType2dbType.items()}
             self._init_db()
+            if "ned_direct_type_mapping" in self.args and self.args.ned_direct_type_mapping:
+                print("USING DIRECT MAP")
+                self.map_typeid2tt = lambda type_id: [self.db.type2tt[self.db.id2type[id]] for id in type_id if self.db.id2type[id] in self.db.type2tt]
+            else:
+                self.map_typeid2tt = lambda type_id: [self.dbType2thingtalkType[self.db.id2type[id]] for id in type_id if self.db.id2type[id] in self.dbType2thingtalkType]
 
     def _init_db(self):
         if self.args.database_type == 'json':
@@ -87,8 +92,9 @@ class BaseAlmondTask(BaseTask):
                     all_canonicals = marisa_trie.Trie(canonical2type.keys())
             with open(os.path.join(self.args.database_dir, 'es_material/type2id.json'), 'r') as fin:
                 type2id = ujson.load(fin)
-            
-            self.db = Database(canonical2type, type2id, all_canonicals,
+            with open(os.path.join(self.args.database_dir, 'es_material/wikiqid2tt_0305.json'), 'r') as fin:
+                type2tt = ujson.load(fin)
+            self.db = Database(canonical2type, type2id, type2tt, all_canonicals,
                                self.args.ned_features_default_val, self.args.ned_features_size)
         
         elif self.args.database_type == 'remote-elastic':
@@ -96,7 +102,9 @@ class BaseAlmondTask(BaseTask):
                 es_config = ujson.load(fin)
             with open(os.path.join(self.args.database_dir, 'es_material/type2id.json'), 'r') as fin:
                 type2id = ujson.load(fin)
-            self.db = RemoteElasticDatabase(es_config, type2id, self.args.ned_features_default_val, self.args.ned_features_size)
+            with open(os.path.join(self.args.database_dir, 'es_material/wikiqid2tt_0305.json'), 'r') as fin:
+                type2tt = ujson.load(fin)
+            self.db = RemoteElasticDatabase(es_config, type2id, type2tt, self.args.ned_features_default_val, self.args.ned_features_size)
 
     @property
     def utterance_field(self):
@@ -293,7 +301,7 @@ class BaseAlmondTask(BaseTask):
                 # token is an entity
                 if any([val != self.args.ned_features_default_val[0] for val in feat.type_id]):
                     final_token = '<e> '
-                    all_types = ' | '.join(set([self.dbType2thingtalkType[self.db.id2type[id]] for id in feat.type_id if self.db.id2type[id] in self.dbType2thingtalkType]))
+                    all_types = ' | '.join(set(self.map_typeid2tt(feat.type_id)))
                     final_token += '( ' + all_types + ' ) ' + token
                     # append all entities with same type
                     i += 1
@@ -314,7 +322,7 @@ class BaseAlmondTask(BaseTask):
                 feat = features[i]
                 # token is an entity
                 if any([val != self.args.ned_features_default_val[0] for val in feat.type_id]):
-                    all_types = ' | '.join(set([self.dbType2thingtalkType[self.db.id2type[id]] for id in feat.type_id if self.db.id2type[id] in self.dbType2thingtalkType]))
+                    all_types = ' | '.join(set(self.map_typeid2tt(feat.type_id)))
                     all_tokens = []
                     # append all entities with same type
                     while i < len(new_sentence_tokens) and features[i] == feat:
@@ -417,10 +425,10 @@ class BaseAlmondTask(BaseTask):
                                                          self.args.ned_features_size[1])
             
             if self.args.verbose and self.args.do_ned:
-                print()
-                print(
-                    *[f'token: {token}\ttype: {token_type}' for token, token_type in zip(new_tokens, tokens_type_ids)],
-                    sep='\n')
+                if tokens_type_ids is not None and tokens_type_ids != [[0.0]]:
+                    print(
+                        *[f'token: {token}\ttype: {token_type}' for token, token_type in zip(new_tokens, tokens_type_ids)],
+                        sep='\n')
         
         zip_list = []
         if tokens_type_ids:

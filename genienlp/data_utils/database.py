@@ -38,9 +38,10 @@ logger = logging.getLogger(__name__)
 
 
 class Database(object):
-    def __init__(self, canonical2type, type2id, all_canonicals, ned_features_default_val, ned_features_size):
+    def __init__(self, canonical2type, type2id, type2tt, all_canonicals, ned_features_default_val, ned_features_size):
         self.canonical2type = canonical2type
         self.type2id = type2id
+        self.type2tt = type2tt
         self.id2type = {v: k for k, v in self.type2id.items()}
         self.all_canonicals = all_canonicals
 
