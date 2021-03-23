@@ -92,10 +92,16 @@ DOMAIN_TYPE_MAPPING['hotels'] = {'Hotel': 'Q571',
 
 ## Dialogues
 DOMAIN_TYPE_MAPPING['spotify'] = {'song': 'Q7366',
-                                  'artist': 'Q5',
-                                  'artists': 'Q5',
+                                  'artist': 'Q1294626',
+                                  'artists': 'Q215380',
                                   'album': 'Q482994',
-                                  'genres': 'Q188451'}   # Q188451:music genre
+                                  'genres': 'Q188451',
+                                  'genre': 'Q188451'} # I am mapping this to opera genere so the gold mapping can differentiate between the two genres.
+                                # {'song': 'Q7366',
+                                #   'artist': 'Q5',
+                                #   'artists': 'Q5',
+                                #   'album': 'Q482994',
+                                #   'genres': 'Q188451'}   # Q188451:music genre
 
 
 BANNED_PHRASES = set(
@@ -113,7 +119,7 @@ BANNED_PHRASES = set(
      'greatest hits', 'good hits', 'content rating', 'how long', 'actor', 'pg', 'ratings', 'rating', 'rated pg', 'key', 'the nice',
      'keyword', 'keywords', 'subtitle', 'subtitles', 'i want that', 'shorter', 'duration', 'num', 'hope', 'rm', 'michelin', 'michelin star', 'michelin stars',
      'reservations', 'zip code', 'zipcode', 'smoke', 'smoking', 'luxury', 'bar', 'bars', 'kitchen', 'cafe', 'cafes', 'coffee', 'where i am',
-     'email']
+     'email', 'music by', 'play the song', 'turn the lights on', 'turn the lights off', 'lights on', 'lights off']
 )
 
 BANNED_REGEXES = [re.compile(r'\d (star|rating)'), re.compile(r'\dth'), re.compile(r'a \d'),

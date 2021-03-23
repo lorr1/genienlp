@@ -28,7 +28,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import os
-from collections import defaultdict
+from collections import defaultdict, Counter
 import marisa_trie
 import ujson
 import logging
@@ -68,19 +68,38 @@ class BaseAlmondTask(BaseTask):
         self.almond_domains = args.almond_domains
         self.all_schema_types = set()
 
+        self.qid2tt_file = "qid2tt_test_995_v7.json"
+        self.keep_none_typed_mentions = self.args.keep_none_typed_mentions if "keep_none_typed_mentions" in self.args else False
+        self.max_TTtypes_per_qidtype = self.args.max_TTtypes_per_qidtype if "max_TTtypes_per_qidtype" in self.args else 1
         if args.do_ned:
             self.unk_id = args.ned_features_default_val[0]
             self.thingtalkType2dbType = dict()
+            print("DOMAINS", self.almond_domains)
             for domain in self.almond_domains:
                 self.thingtalkType2dbType.update(DOMAIN_TYPE_MAPPING[domain])
             self.dbType2thingtalkType = {v: k for k, v in self.thingtalkType2dbType.items()}
             self._init_db()
             if "ned_direct_type_mapping" in self.args and self.args.ned_direct_type_mapping:
-                print("USING DIRECT MAP")
-                self.map_typeid2tt = lambda type_id: [self.db.type2tt[self.db.id2type[id]] for id in type_id if self.db.id2type[id] in self.db.type2tt]
+                print("USING DIRECT MAP WITH", self.keep_none_typed_mentions, "KEEP NONE")
+                print("MAX TT TYPE", self.max_TTtypes_per_qidtype)
+                def direct_type_map(type_id, id2type, type2tt, thingtalkType2dbType, max_tt_type=self.max_TTtypes_per_qidtype):
+                    res = []
+                    for id in type_id:
+                        type_qid = id2type[id]
+                        tt_types = type2tt.get(type_qid, [])[:max_tt_type]
+                        res.extend(tt_types)
+                        # print(type_qid, tt_types, res, "FULL", type2tt.get(type_qid, []))
+                    mc = Counter(res).most_common(1)
+                    if len(mc) == 0:
+                        return []
+                    # Filter by domain
+                    selected = [t for t in [mc[0][0]] if t in thingtalkType2dbType]
+                    return selected
+                # Does a direct map to TT types and intersects with domain appropriate types
+                self.map_typeid2tt = lambda type_id: direct_type_map(type_id, self.db.id2type, self.db.type2tt, self.thingtalkType2dbType)
             else:
-                self.map_typeid2tt = lambda type_id: [self.dbType2thingtalkType[self.db.id2type[id]] for id in type_id if self.db.id2type[id] in self.dbType2thingtalkType]
-
+                self.map_typeid2tt = lambda type_id: [self.dbType2thingtalkType[self.db.id2type[id]] for id in type_id
+                                                      if self.db.id2type[id] in self.dbType2thingtalkType]
     def _init_db(self):
         if self.args.database_type == 'json':
             canonical2type = {}
@@ -92,8 +111,9 @@ class BaseAlmondTask(BaseTask):
                     all_canonicals = marisa_trie.Trie(canonical2type.keys())
             with open(os.path.join(self.args.database_dir, 'es_material/type2id.json'), 'r') as fin:
                 type2id = ujson.load(fin)
-            with open(os.path.join(self.args.database_dir, 'es_material/wikiqid2tt_0305.json'), 'r') as fin:
+            with open(os.path.join(self.args.database_dir, 'es_material', self.qid2tt_file), 'r') as fin:
                 type2tt = ujson.load(fin)
+                print("LOADED", os.path.join("es_material", self.qid2tt_file))
             self.db = Database(canonical2type, type2id, type2tt, all_canonicals,
                                self.args.ned_features_default_val, self.args.ned_features_size)
         
@@ -102,7 +122,7 @@ class BaseAlmondTask(BaseTask):
                 es_config = ujson.load(fin)
             with open(os.path.join(self.args.database_dir, 'es_material/type2id.json'), 'r') as fin:
                 type2id = ujson.load(fin)
-            with open(os.path.join(self.args.database_dir, 'es_material/wikiqid2tt_0305.json'), 'r') as fin:
+            with open(os.path.join(self.args.database_dir, 'es_material', self.qid2tt_file), 'r') as fin:
                 type2tt = ujson.load(fin)
             self.db = RemoteElasticDatabase(es_config, type2id, type2tt, self.args.ned_features_default_val, self.args.ned_features_size)
 
@@ -126,7 +146,7 @@ class BaseAlmondTask(BaseTask):
     
     def collect_answer_entity_types(self, answer):
         entity2type = dict()
-        
+        entity2schementitytype = dict()
         answer_entities = quoted_pattern_with_space.findall(answer)
         for ent in answer_entities:
             
@@ -164,6 +184,7 @@ class BaseAlmondTask(BaseTask):
                     schema_type = self.thingtalkType2dbType[schema_entity_type]
     
                 entity2type[ent] = schema_type
+                entity2schementitytype[ent] = schema_entity_type
 
             else:
             
@@ -217,10 +238,11 @@ class BaseAlmondTask(BaseTask):
                     schema_type = self.thingtalkType2dbType[schema_entity_type]
                 
                 entity2type[ent] = schema_type
+                entity2schementitytype[ent] = schema_entity_type
                 
             self.all_schema_types.add(schema_entity_type)
             
-        return entity2type
+        return entity2type, entity2schementitytype
     
     def pad_features(self, features, max_size, pad_id):
         if len(features) > max_size:
@@ -247,7 +269,7 @@ class BaseAlmondTask(BaseTask):
             type_id = self.pad_features([type_id], self.args.ned_features_size[0], self.args.ned_features_default_val[0])
             
             tokens_type_ids[token_pos: token_pos + ent_num_tokens] = [type_id] * ent_num_tokens
-        
+        # print("ORACLE", entity2type, "|||", tokens_type_ids, "|||", tokens)
         return tokens_type_ids
     
     def find_type_ids(self, tokens, answer):
@@ -261,7 +283,7 @@ class BaseAlmondTask(BaseTask):
                 answer_entities = quoted_pattern_with_space.findall(answer)
                 tokens_type_ids = self.db.lookup(tokens, answer_entities=answer_entities)
             elif self.args.ned_retrieve_method == 'type-oracle':
-                entity2type = self.collect_answer_entity_types(answer)
+                entity2type, entity2schementitytype = self.collect_answer_entity_types(answer)
                 tokens_type_ids = self.oracle_type_ids(tokens, entity2type)
         
         return tokens_type_ids
@@ -308,14 +330,18 @@ class BaseAlmondTask(BaseTask):
                     while i < len(new_sentence_tokens) and features[i] == feat:
                         final_token += ' ' + new_sentence_tokens[i]
                         i += 1
+                    # Catch this _after_ incrementing i
+                    if len(all_types) == 0 and not self.keep_none_typed_mentions:
+                        continue
                     final_token += ' </e>'
                     sentence_plus_types_tokens.append(final_token)
                 else:
                     sentence_plus_types_tokens.append(token)
                     i += 1
-        
-        
+
+
         elif add_types_to_text == 'append':
+            # FOR EACH ENTITY IN THE SENTENCE, WILL APPEND <e> [mention] (type ; type ; ...) [mention] (type ; type ; ...) </e>
             sentence_plus_types_tokens.extend(new_sentence_tokens)
             sentence_plus_types_tokens.append('<e>')
             while i < len(new_sentence_tokens):
@@ -329,6 +355,9 @@ class BaseAlmondTask(BaseTask):
                         all_tokens.append(new_sentence_tokens[i])
                         i += 1
                     final_token = ' '.join([*all_tokens, '(', all_types, ')', ';'])
+                    # Catch this _after_ incrementing i
+                    if len(all_types) == 0 and not self.keep_none_typed_mentions:
+                        continue
                     sentence_plus_types_tokens.append(final_token)
                 else:
                     i += 1

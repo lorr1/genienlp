@@ -35,6 +35,7 @@ from pprint import pformat
 from collections import defaultdict
 import copy
 import shutil
+import numpy as np
 
 # multiprocessing with CUDA
 import ujson
@@ -70,6 +71,7 @@ def prepare_data(args, device):
     
     datasets = []
     paths = []
+    all_bootleg_labels = []
     if len(args.pred_src_languages) == 1 and len(args.tasks) > 1:
         args.pred_src_languages *= len(args.tasks)
     for i, task in enumerate(args.tasks):
@@ -101,6 +103,7 @@ def prepare_data(args, device):
             task_paths = [task_paths]
         task_data_processed = []
         task_path_processed = []
+        task_bootleg_lables = []
         for split, path in zip(task_splits, task_paths):
             assert (split.eval or split.test or split.train) and not split.aux
             if split.train:
@@ -114,18 +117,22 @@ def prepare_data(args, device):
                 path = path.test
             if bootleg:
                 if split.train or split.eval:
-                    bootleg_process_splits(args, data.examples, path, task, bootleg)
+                    bootleg_labels = bootleg_process_splits(args, data.examples, path, task, bootleg)
                 else:
                     # no prepped bootleg features are available
                     # extract features on-the-fly using bootleg annotator
                     bootleg_annotator = init_bootleg_annotator(args, device)
-                    extract_features_with_annotator(data.examples, bootleg_annotator, args, task)
+                    bootleg_labels = extract_features_with_annotator(data.examples, bootleg_annotator, args, task)
+            else:
+                bootleg_labels = []
             task_data_processed.append(data)
             task_path_processed.append(path)
+            task_bootleg_lables.append(bootleg_labels)
         datasets.append(task_data_processed)
         paths.append(task_path_processed)
+        all_bootleg_labels.append(task_bootleg_lables)
 
-    return datasets
+    return datasets, all_bootleg_labels
 
 
 
@@ -175,7 +182,7 @@ def run(args, device):
                                      tgt_lang=tgt_lang
                                      )
 
-    val_sets = prepare_data(args, device)
+    val_sets, all_bootleg_labels = prepare_data(args, device)
     model.add_new_vocab_from_data(args.tasks)
 
     iters = prepare_data_iterators(args, val_sets, model.numericalizer, device)
@@ -191,7 +198,7 @@ def run(args, device):
     os.makedirs(eval_dir, exist_ok=True)
 
     with torch.no_grad():
-        for task, language, it, original_order in iters:
+        for task_idx, (task, language, it, original_order) in enumerate(iters):
             logger.info(task.name)
             # single language task
             if language is None or 'multilingual' not in task.name:
@@ -237,6 +244,16 @@ def run(args, device):
                             "predictions": generation_output.predictions[i],
                             "answer": generation_output.answers[i],
                             "context": generation_output.contexts[i]}
+                    # print(generation_output.contexts[i])
+                    entity2type, entity2schementitytype = task.collect_answer_entity_types(generation_output.answers[i])
+                    line["genie_mention2type"] = list(entity2type.items())
+                    line["genie_mention2typeschema"] = list(entity2schementitytype.items())
+                    labels = all_bootleg_labels[task_idx][0]
+                    for boot_k in labels:
+                        try:
+                            line[boot_k] = [arr.tolist() for arr in labels[boot_k][i]]
+                        except:
+                            line[boot_k] = labels[boot_k][i]
                     if args.calibrator_paths is not None:
                         for j, score in enumerate(generation_output.confidence_scores):
                             line[f"score_{j}"] = score[i]
@@ -273,6 +290,7 @@ def run(args, device):
     logger.info(f'-------------------')
     logger.info(f'DecaScore:  {sum(decaScore)}\n')
     logger.info(f'\nSummary: | {sum(decaScore)} | {" | ".join([str(x) for x in decaScore])} |\n')
+    logger.info(f"Saved Predictions at {prediction_file_name}")
 
 
 def parse_argv(parser):

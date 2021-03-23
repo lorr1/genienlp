@@ -173,10 +173,11 @@ def bootleg_process_splits(args, examples, path, task, bootleg, mode='train'):
         bootleg.disambiguate_mentions(config_args)
         
     # extract features for each token in input sentence from bootleg outputs
-    all_token_type_ids, all_tokens_type_probs = bootleg.collect_features(input_file_name[:-len('_bootleg.jsonl')], args.subsample)
+    all_token_type_ids, all_tokens_type_probs, all_bootleg_labels = bootleg.collect_features(input_file_name[:-len('_bootleg.jsonl')], args.subsample)
     
     all_token_type_ids = all_token_type_ids[:args.subsample]
     all_tokens_type_probs = all_tokens_type_probs[:args.subsample]
+    all_bootleg_labels = all_bootleg_labels[:args.subsample]
     
     # override examples features with bootleg features
     if mode != 'dump':
@@ -211,6 +212,8 @@ def bootleg_process_splits(args, examples, path, task, bootleg, mode='train'):
                 print()
                 print(*[f'token: {token}\ttype: {token_type}' for token, token_type in
                         zip(ex.context_plus_question.split(' '), ex.context_plus_question_feature)], sep='\n')
+
+    return all_bootleg_labels
 
 
 def dump_bootleg_features(args, logger):

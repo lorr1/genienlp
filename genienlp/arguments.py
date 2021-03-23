@@ -168,8 +168,12 @@ def parse_argv(parser):
     parser.add_argument('--bootleg_dataset_threads', type=int, default=2, help='Number of threads for parallel processing of dataset in bootleg')
     parser.add_argument('--bootleg_dataloader_threads', type=int, default=4, help='Number of threads for parallel loading of datasets in bootleg')
     parser.add_argument('--bootleg_extract_num_workers', type=int, default=4, help='Number of workers for extracing mentions step of bootleg')
+    parser.add_argument('--max_qidtypes_per_entity', type=int, default=3, help='Number of max qid types per entity')
+    parser.add_argument('--max_TTtypes_per_qidtype', type=int, default=1, help='Number of max qid types per entity')
+    parser.add_argument('--max_entities_per_mention', type=int, default=1, help='Number of max qid types per entity')
     parser.add_argument('--bootleg_post_process_types', action='store_true', help='Postprocess bootleg types')
     parser.add_argument('--ned_direct_type_mapping', action='store_true', help='Postprocess bootleg types')
+    parser.add_argument('--keep_none_typed_mentions', action='store_true', help='Postprocess bootleg types')
     
     parser.add_argument('--entity_type_agg_method', choices=['average', 'weighted'], default='average', help='Method used to aggregate several type embeddings for a single mention')
     parser.add_argument("--entity_word_embeds_dropout", default=0.0, type=float, help='Dropout entity word embeddings with this probability when encoding inputs')

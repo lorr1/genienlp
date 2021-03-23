@@ -41,6 +41,18 @@ from bootleg.end2end.bootleg_annotator import BootlegAnnotator
 
 logger = logging.getLogger(__name__)
 
+def qid_filt_prob(qids, probs, filt, max_len=-1):
+    filtered_values = list(filter(lambda x: x[1] > filt, sorted(zip(qids, probs), key=lambda x: x[1], reverse=True)))
+    if len(filtered_values) == 0:
+        return [], []
+    else:
+        filt_qids, filt_probs = zip(*filtered_values)
+        if max_len <= 0:
+            return filt_qids, filt_probs
+        else:
+            if len(filt_qids) > 1:
+                print(qids, probs, filt_qids, filt_probs)
+            return filt_qids[:max_len], filt_probs[:max_len]
 
 def reverse_bisect_left(a, x, lo=None, hi=None):
     """Find item x in list a, and keep it reverse-sorted assuming a
@@ -108,6 +120,8 @@ def extract_features_with_annotator(examples, bootleg_annotator, args, task):
             ex = examples[i]
             label = bootleg_labels_unpacked[i]
             examples[i] = bootleg_process_examples(ex, bootleg_annotator, args, label, task)
+
+        return bootleg_labels
 
 
 def init_bootleg_annotator(args, device):
@@ -319,18 +333,21 @@ class Bootleg(object):
         
         self.almond_domains = args.almond_domains
         self.bootleg_post_process_types = args.bootleg_post_process_types
-        
+
+        self.max_entities_per_mention = self.args.max_entities_per_mention if "max_entities_per_mention" in self.args else 1
+        self.max_qidtypes_per_entity = self.args.max_qidtypes_per_entity if "max_qidtypes_per_entity" in self.args else 3
+        print("max_entities_per_mention", self.max_entities_per_mention)
+        print("max_qidtypes_per_entity", self.max_qidtypes_per_entity)
         with open(f'{self.args.database_dir}/emb_data/WikiQID_to_WikiTypeQID_1229.json', 'r') as fin:
-            self.qid2type = ujson.load(fin)
+            self.qid2type = {k: v[:self.max_qidtypes_per_entity] for k,v in ujson.load(fin).items()}
         with open(f'{self.args.database_dir}/es_material/type2id.json', 'r') as fin:
             self.type2id = ujson.load(fin)
 
         with open(f'{self.args.database_dir}/emb_data/wikidatatitle_to_typeid_1229.json', 'r') as fin:
             title2typeid = ujson.load(fin)
             self.typeid2title = {v: k for k, v in title2typeid.items()}
-            
+
         self.cur_entity_embed_size = 0
-        
         # Mapping between model directory and checkpoint name
         model2checkpoint = {'bootleg_wiki': 'bootleg_model.pt',
                             'bootleg_wiki_types': 'bootleg_types.pt',
@@ -395,20 +412,18 @@ class Bootleg(object):
         run_model(self.args.bootleg_dump_mode, config_args)
 
     def collect_features_per_line(self, line, threshold):
-        
         tokenized = line['sentence'].split(' ')
         tokens_type_ids = [[self.args.ned_features_default_val[0]] * self.args.ned_features_size[0] for _ in range(len(tokenized))]
         tokens_type_probs = [[self.args.ned_features_default_val[1]] * self.args.ned_features_size[1] for _ in range(len(tokenized))]
     
         for alias, all_qids, all_probs, span in zip(line['aliases'], line['cands'], line['cand_probs'], line['spans']):
+
             # filter qids with confidence lower than a threshold
-            idx = reverse_bisect_left(all_probs, threshold)
-            all_qids = all_qids[:idx]
-            all_probs = all_probs[:idx]
+            all_qids, all_probs = qid_filt_prob(all_qids, all_probs, threshold, max_len=self.max_entities_per_mention)
 
             type_ids = []
             type_probs = []
-        
+            # Some aliases are dropped due to thresholding
             if not is_banned(alias):
                 for qid, prob in zip(all_qids, all_probs):
                     # get all type for a qid
@@ -416,10 +431,10 @@ class Bootleg(object):
                         all_types = self.qid2type[qid]
                     else:
                         all_types = []
-                
+
                     if isinstance(all_types, str):
                         all_types = [all_types]
-                
+
                     if len(all_types):
                         # update
                         # go through all types
@@ -447,14 +462,15 @@ class Bootleg(object):
         
         all_tokens_type_ids = []
         all_tokens_type_probs = []
-        
+        all_bootleg_labels = []
         threshold = self.args.bootleg_prob_threshold
 
         with open(f'{self.args.bootleg_output_dir}/{file_name}_bootleg/{self.ckpt_name}/bootleg_labels.jsonl', 'r') as fin:
             for i, line in enumerate(fin):
+                line = ujson.loads(line)
+                all_bootleg_labels.append(line)
                 if i >= subsample:
                     break
-                line = ujson.loads(line)
                 tokens_type_ids, tokens_type_probs = self.collect_features_per_line(line, threshold)
                 all_tokens_type_ids.append(tokens_type_ids)
                 all_tokens_type_probs.append(tokens_type_probs)
@@ -464,7 +480,7 @@ class Bootleg(object):
                 emb_data = np.load(fin)
                 self.cur_entity_embed_size += emb_data.shape[0]
                 
-        return all_tokens_type_ids, all_tokens_type_probs
+        return all_tokens_type_ids, all_tokens_type_probs, all_bootleg_labels
     
     
     def merge_embeds(self, file_list):

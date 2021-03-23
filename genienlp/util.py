@@ -660,7 +660,7 @@ def load_config_json(args):
                     'do_ned', 'database_type', 'min_entity_len', 'max_entity_len',
                     'entity_type_agg_method', 'entity_word_embeds_dropout',
                     'num_db_types', 'db_unk_id', 'ned_retrieve_method', 'database_lookup_method', 'almond_domains',
-                    'ned_features', 'ned_features_size', 'ned_features_default_val',
+                    'ned_features', 'ned_features_size', 'ned_features_default_val', 'ned_direct_type_mapping', 'keep_none_typed_mentions',
                     'bootleg_output_dir', 'bootleg_model', 'bootleg_batch_size',
                     'bootleg_kg_encoder_layer', 'bootleg_dataset_threads', 'bootleg_dataloader_threads', 'bootleg_extract_num_workers',
                     'bootleg_dump_mode', 'bootleg_prob_threshold', 'bootleg_post_process_types'
@@ -669,7 +669,7 @@ def load_config_json(args):
         # train and predict scripts have these arguments in common. We use the values from train only if they are not provided in predict
         overwrite = ['val_batch_size', 'num_beams', 'num_beam_groups', 'diversity_penalty',
                      'num_outputs', 'no_repeat_ngram_size', 'top_p', 'top_k', 'repetition_penalty',
-                     'temperature', 'max_output_length', 'reduce_metrics',
+                     'temperature', 'max_output_length', 'reduce_metrics', "max_qidtypes_per_entity", "max_TTtypes_per_qidtype",
                      'database_dir']
         for o in overwrite:
             if o not in args or getattr(args, o) is None:
@@ -680,7 +680,8 @@ def load_config_json(args):
                 setattr(args, r, config[r])
             # These are for backward compatibility with models that were trained before we added these arguments
             elif r in ('do_ned', 'use_encoder_loss',
-                       'almond_has_multiple_programs', 'almond_lang_as_question', 'preprocess_special_tokens', 'almond_thingtalk_version'
+                       'almond_has_multiple_programs', 'almond_lang_as_question', 'preprocess_special_tokens',
+                       'almond_thingtalk_version', 'ned_direct_type_mapping', 'keep_none_typed_mentions',
                        ):
                 setattr(args, r, False)
             elif r in ('num_db_types', 'db_unk_id', 'num_workers'):
@@ -701,6 +702,10 @@ def load_config_json(args):
                 setattr(args, r, 2)
             elif r == 'max_entity_len':
                 setattr(args, r, 4)
+            elif r == 'max_qidtypes_per_entity':
+                setattr(args, r, 3)
+            elif r == 'max_TTtypes_per_qidtype':
+                setattr(args, r, 1)
             elif r == 'database_dir':
                 setattr(args, r, None)
             elif r == 'ned_retrieve_method':

@@ -130,6 +130,7 @@ class NumericalizedExamples(NamedTuple):
         numericalized_examples = []
         
         if add_types_to_text != 'no':
+            print("GOOD")
             tokenized_contexts = numericalizer.encode_batch([ex.context_plus_question_with_types for ex in examples], field_name='context')
         else:
             tokenized_contexts = numericalizer.encode_batch(
