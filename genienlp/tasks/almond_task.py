@@ -68,7 +68,7 @@ class BaseAlmondTask(BaseTask):
         self.almond_domains = args.almond_domains
         self.all_schema_types = set()
 
-        self.qid2tt_file = "qid2tt_test_995_v7.json"
+        self.qid2tt_file = "qid2tt_anchor.json"
         self.keep_none_typed_mentions = self.args.keep_none_typed_mentions if "keep_none_typed_mentions" in self.args else False
         self.max_TTtypes_per_qidtype = self.args.max_TTtypes_per_qidtype if "max_TTtypes_per_qidtype" in self.args else 1
         if args.do_ned:
